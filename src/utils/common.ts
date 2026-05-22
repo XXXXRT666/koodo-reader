@@ -1434,52 +1434,67 @@ export const normalizePickerColor = (
     .join("")}`;
 };
 export const splitSentences = (text: string, maxLength?: number) => {
-  const lang = detectLocalLanguage(text);
-  const resolvedMaxLength = maxLength ?? (lang === "en" ? 150 : 50);
+  const resolvedMaxLength = maxLength ?? 450;
+  const readablePattern = /[\p{L}\p{N}]/u;
+  const source = text.trim();
+  if (!source || !readablePattern.test(source)) return [];
+  if (source.length <= resolvedMaxLength) return [source];
 
-  const segmenter = new (Intl as any).Segmenter(lang, {
-    granularity: "sentence",
-  });
-  const segments = segmenter.segment(text);
+  const splitByBoundary = (sentence: string, pattern: RegExp): string[] => {
+    return sentence
+      .split(pattern)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  };
 
-  const sentences = Array.from(segments).map((s: any) => s.segment);
-  const trimmed = sentences
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.trim() !== "");
+  const mergeWithinLimit = (parts: string[], separator = ""): string[] => {
+    const result: string[] = [];
+    let current = "";
+    for (const part of parts) {
+      const candidate = current ? current + separator + part : part;
+      if (candidate.length <= resolvedMaxLength) {
+        current = candidate;
+      } else {
+        if (current) result.push(current);
+        current = part;
+      }
+    }
+    if (current) result.push(current);
+    return result;
+  };
+
+  const splitByLength = (sentence: string): string[] => {
+    const result: string[] = [];
+    for (let index = 0; index < sentence.length; index += resolvedMaxLength) {
+      result.push(sentence.slice(index, index + resolvedMaxLength).trim());
+    }
+    return result;
+  };
+
   const splitLongSentence = (sentence: string): string[] => {
     if (sentence.length <= resolvedMaxLength) return [sentence];
 
-    // Try splitting by common punctuation marks (Chinese and Western)
-    const parts = sentence
-      .split(/(?<=[,，;；:：、…])/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-
-    if (parts.length > 1) {
-      // Greedily merge parts to minimize the number of resulting chunks
-      const result: string[] = [];
-      let current = "";
-      for (const part of parts) {
-        const candidate = current ? current + part : part;
-        if (candidate.length <= resolvedMaxLength) {
-          current = candidate;
-        } else {
-          if (current) result.push(current);
-          // If a single part already exceeds maxLength, keep it as-is
-          current = part;
-        }
-      }
-      if (current) result.push(current);
-      return result;
+    const strongParts = splitByBoundary(sentence, /(?<=[。！？!?；;])/);
+    if (strongParts.length > 1) {
+      return mergeWithinLimit(strongParts).flatMap(splitLongSentence);
     }
 
-    // No punctuation found, keep the sentence as-is
-    return [sentence];
+    const weakParts = splitByBoundary(sentence, /(?<=[，,、：:…])/);
+    if (weakParts.length > 1) {
+      return mergeWithinLimit(weakParts).flatMap(splitLongSentence);
+    }
+
+    const spaceParts = splitByBoundary(sentence, /(?<=\s)/);
+    if (spaceParts.length > 1) {
+      return mergeWithinLimit(spaceParts, " ").flatMap(splitLongSentence);
+    }
+
+    return splitByLength(sentence);
   };
 
-  return trimmed
-    .flatMap(splitLongSentence)
-    .filter((sentence) => /[\p{L}\p{N}]/u.test(sentence));
+  return splitLongSentence(source).filter((sentence) =>
+    readablePattern.test(sentence)
+  );
 };
 export const trimSpecialCharacters = (text: string) => {
   return text.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");

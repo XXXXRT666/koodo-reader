@@ -1,0 +1,61 @@
+name: Build unsigned desktop app
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            os: macos-latest
+            artifact: koodo-reader-macos-unsigned
+          - platform: Windows
+            os: windows-latest
+            artifact: koodo-reader-windows-unsigned
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Disable macOS signing and notarization
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+          const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          packageJson.build.mac.identity = null;
+          packageJson.build.mac.notarize = false;
+          fs.writeFileSync("package.json", `${JSON.stringify(packageJson, null, 2)}\n`);
+          NODE
+
+      - name: Build unsigned package
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          USE_HARD_LINKS: false
+        run: npm run release -- --publish never
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.blockmap
+          if-no-files-found: error

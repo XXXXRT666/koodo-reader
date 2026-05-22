@@ -22,6 +22,9 @@ import { fetchUserInfo } from "../../utils/request/user";
 import { getSplitSentence } from "../../utils/request/reader";
 import { Howl } from "howler";
 declare var window: any;
+const DEFAULT_SPEECH_SEGMENT_MAX_LENGTH = 450;
+const DEFAULT_SPEECH_SEGMENT_DELAY = 0.5;
+
 class TextToSpeech extends React.Component<
   TextToSpeechProps,
   TextToSpeechState
@@ -549,6 +552,28 @@ class TextToSpeech extends React.Component<
       await this.handleSystemRead(0);
     }
   };
+  getSpeechSegmentMaxLength = () => {
+    const rawValue = parseInt(
+      ConfigService.getReaderConfig("speechSegmentMaxLength") ||
+        `${DEFAULT_SPEECH_SEGMENT_MAX_LENGTH}`,
+      10
+    );
+    if (Number.isNaN(rawValue)) return DEFAULT_SPEECH_SEGMENT_MAX_LENGTH;
+    return Math.min(600, Math.max(1, rawValue));
+  };
+  getSpeechSegmentDelay = () => {
+    const rawValue = parseFloat(
+      ConfigService.getReaderConfig("speechSegmentDelay") ||
+        `${DEFAULT_SPEECH_SEGMENT_DELAY}`
+    );
+    if (Number.isNaN(rawValue)) return DEFAULT_SPEECH_SEGMENT_DELAY;
+    return Math.min(10, Math.max(0, rawValue));
+  };
+  waitSegmentDelay = async () => {
+    const delay = this.getSpeechSegmentDelay();
+    if (delay <= 0) return;
+    await sleep(delay * 1000);
+  };
   handleGetText = async () => {
     if (ConfigService.getReaderConfig("isSliding") === "yes") {
       await sleep(1000);
@@ -566,7 +591,7 @@ class TextToSpeech extends React.Component<
     ) {
     } else {
       rawNodeList = nodeTextList.map((text) => {
-        return splitSentences(text);
+        return splitSentences(text, this.getSpeechSegmentMaxLength());
       });
 
       nodeTextList = rawNodeList.flat();
@@ -708,6 +733,10 @@ class TextToSpeech extends React.Component<
         return;
       }
       if (this.state.isPaused || !this.state.isAudioOn) return;
+      if (res === "start") {
+        await this.waitSegmentDelay();
+      }
+      if (this.state.isPaused || !this.state.isAudioOn) return;
       let visibleTextList = await this.props.htmlBook.rendition.visibleText();
       let lastVisibleTextList = visibleTextList;
       if (
@@ -718,7 +747,7 @@ class TextToSpeech extends React.Component<
       ) {
       } else {
         let rawNodeList = visibleTextList.map((text) => {
-          return splitSentences(text);
+          return splitSentences(text, this.getSpeechSegmentMaxLength());
         });
 
         lastVisibleTextList = rawNodeList.flat();
@@ -788,6 +817,8 @@ class TextToSpeech extends React.Component<
     );
 
     if (res === "start") {
+      await this.waitSegmentDelay();
+      if (this.state.isPaused || !this.state.isAudioOn) return;
       let visibleTextList = await this.props.htmlBook.rendition.visibleText();
 
       let lastVisibleTextList = visibleTextList;
@@ -799,7 +830,7 @@ class TextToSpeech extends React.Component<
       ) {
       } else {
         let rawNodeList = visibleTextList.map((text) => {
-          return splitSentences(text);
+          return splitSentences(text, this.getSpeechSegmentMaxLength());
         });
 
         lastVisibleTextList = rawNodeList.flat();
@@ -1198,6 +1229,65 @@ class TextToSpeech extends React.Component<
               </option>
             ))}
           </select>
+        </div>
+        <div
+          className="setting-dialog-new-title"
+          style={{ marginLeft: "20px", width: "88%", fontWeight: 500 }}
+        >
+          <Trans>Max segment length</Trans>
+          <input
+            type="number"
+            min="1"
+            max="600"
+            step="1"
+            className="lang-setting-dropdown"
+            value={
+              ConfigService.getReaderConfig("speechSegmentMaxLength") ||
+              `${DEFAULT_SPEECH_SEGMENT_MAX_LENGTH}`
+            }
+            onChange={(event) => {
+              const value = parseInt(event.target.value, 10);
+              const nextValue = Number.isNaN(value)
+                ? DEFAULT_SPEECH_SEGMENT_MAX_LENGTH
+                : Math.min(600, Math.max(1, value));
+              ConfigService.setReaderConfig(
+                "speechSegmentMaxLength",
+                `${nextValue}`
+              );
+              if (this.state.isAudioOn) {
+                toast(this.props.t("Take effect in a while"));
+              }
+              this.forceUpdate();
+            }}
+          />
+        </div>
+        <div
+          className="setting-dialog-new-title"
+          style={{ marginLeft: "20px", width: "88%", fontWeight: 500 }}
+        >
+          <Trans>Segment pause</Trans>
+          <input
+            type="number"
+            min="0"
+            max="10"
+            step="0.1"
+            className="lang-setting-dropdown"
+            value={
+              ConfigService.getReaderConfig("speechSegmentDelay") ||
+              `${DEFAULT_SPEECH_SEGMENT_DELAY}`
+            }
+            onChange={(event) => {
+              const value = parseFloat(event.target.value);
+              const nextValue = Number.isNaN(value)
+                ? DEFAULT_SPEECH_SEGMENT_DELAY
+                : Math.min(10, Math.max(0, value));
+              ConfigService.setReaderConfig(
+                "speechSegmentDelay",
+                `${nextValue}`
+              );
+              this.forceUpdate();
+            }}
+          />
         </div>
         <div style={{ marginTop: "20px", textAlign: "center" }}>
           <span
