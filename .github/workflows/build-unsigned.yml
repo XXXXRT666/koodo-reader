@@ -34,7 +34,7 @@ jobs:
           corepack prepare yarn@1.22.22 --activate
           yarn install --frozen-lockfile --network-timeout 1000000
 
-      - name: Disable macOS signing and notarization
+      - name: Configure unsigned macOS packaging
         if: runner.os == 'macOS'
         shell: bash
         run: |
@@ -43,6 +43,7 @@ jobs:
           const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
           packageJson.build.mac.identity = null;
           packageJson.build.mac.notarize = false;
+          packageJson.build.afterPack = "scripts/ci-ad-hoc-sign-mac.js";
           fs.writeFileSync("package.json", `${JSON.stringify(packageJson, null, 2)}\n`);
           NODE
 
