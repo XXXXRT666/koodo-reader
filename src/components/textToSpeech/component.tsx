@@ -91,6 +91,7 @@ class TextToSpeech extends React.Component<
     this.previewPlayer = null;
   }
   async componentDidMount() {
+    window.addEventListener("keydown", this.handlePlaybackShortcut, true);
     if ("speechSynthesis" in window) {
       this.setState({ isSupported: true });
     }
@@ -197,6 +198,7 @@ class TextToSpeech extends React.Component<
     }
   }
   componentWillUnmount() {
+    window.removeEventListener("keydown", this.handlePlaybackShortcut, true);
     this.stopPreviewAudio();
   }
   componentDidUpdate(prevProps: Readonly<TextToSpeechProps>) {
@@ -226,6 +228,40 @@ class TextToSpeech extends React.Component<
       await this.handleStop();
     }
     this.handleStartAudio();
+  };
+  isEditableShortcutTarget = (target: any) => {
+    if (!target) return false;
+    const tagName = target.tagName?.toLowerCase();
+    return (
+      tagName === "input" ||
+      tagName === "textarea" ||
+      tagName === "select" ||
+      target.isContentEditable
+    );
+  };
+  handlePlaybackShortcut = (event: KeyboardEvent) => {
+    if (
+      event.code !== "Space" ||
+      !event.shiftKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      this.isEditableShortcutTarget(event.target)
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    if (!this.state.isAudioOn) return;
+
+    if (this.state.isPaused) {
+      this.handlePauseResume();
+    } else {
+      this.handlePauseAudio();
+    }
   };
   handleMultiRoleToggle = (enabled: boolean) => {
     if (enabled) {
