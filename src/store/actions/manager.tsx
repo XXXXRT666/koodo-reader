@@ -23,6 +23,38 @@ import { langToName } from "../../utils/common";
 import { resetReaderRequest } from "../../utils/request/reader";
 import { resetThirdpartyRequest } from "../../utils/request/thirdparty";
 import DictUtil from "../../utils/file/dictUtil";
+import builtInAliyunCustomVoicePlugin from "../../assets/plugins/aliyun-custom-voice-tts-plugin.json";
+declare var global: any;
+
+const clonePlugin = (plugin: any) => JSON.parse(JSON.stringify(plugin));
+const seedBuiltInAliyunCustomVoicePlugin = async (pluginList: PluginModel[]) => {
+  const plugin = clonePlugin(builtInAliyunCustomVoicePlugin);
+  const pluginKey = plugin.identifier;
+  const apiKey = plugin.config?.apiKey || "";
+
+  if (!apiKey) {
+    return pluginList;
+  }
+
+  try {
+    plugin.key = pluginKey;
+    if (plugin.type === "voice" && plugin.voiceList.length === 0) {
+      const voiceFunc = plugin.script;
+      // eslint-disable-next-line no-eval
+      eval(voiceFunc);
+      plugin.voiceList = await global.getTTSVoice(plugin.config);
+    }
+    await DatabaseService.deleteRecord(pluginKey, "plugins");
+    await DatabaseService.saveRecord(plugin, "plugins");
+    return [
+      ...pluginList.filter((item: any) => item.key !== pluginKey),
+      plugin,
+    ];
+  } catch (error) {
+    console.error("Failed to seed built-in Aliyun custom voice plugin:", error);
+    return pluginList;
+  }
+};
 export function handleBooks(books: BookModel[]) {
   return { type: "HANDLE_BOOKS", payload: books };
 }
@@ -279,6 +311,7 @@ export function handleFetchPlugins() {
   return async (dispatch: Dispatch) => {
     DatabaseService.getAllRecords("plugins").then(async (pluginList) => {
       try {
+        pluginList = await seedBuiltInAliyunCustomVoicePlugin(pluginList || []);
         // Migrate legacy AI model entries from DB to ConfigService
         const legacyAiPlugins = pluginList.filter(
           (p: PluginModel) => p.type === "ai"
