@@ -34,6 +34,11 @@ jobs:
           corepack prepare yarn@1.22.22 --activate
           yarn install --frozen-lockfile --network-timeout 1000000
 
+      - name: Inject bundled plugin API key
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+        run: node scripts/ci-inject-api-key.js
+
       - name: Configure unsigned macOS packaging
         if: runner.os == 'macOS'
         shell: bash
@@ -47,11 +52,19 @@ jobs:
           fs.writeFileSync("package.json", `${JSON.stringify(packageJson, null, 2)}\n`);
           NODE
 
-      - name: Build unsigned package
+      - name: Build unsigned Windows package
+        if: runner.os == 'Windows'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
           USE_HARD_LINKS: false
-        run: yarn release --publish never
+        run: yarn release --win nsis --x64 --publish never
+
+      - name: Build unsigned macOS package
+        if: runner.os == 'macOS'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          USE_HARD_LINKS: false
+        run: yarn release --mac dmg --arm64 --publish never
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v6
@@ -59,7 +72,5 @@ jobs:
           name: ${{ matrix.artifact }}
           path: |
             dist/*.dmg
-            dist/*.zip
             dist/*.exe
-            dist/*.blockmap
           if-no-files-found: error
