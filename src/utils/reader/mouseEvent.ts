@@ -133,12 +133,67 @@ const arrowKeys = async (
   handleShortcut(event);
 };
 
+const getScrollOffset = (offset: number) => Math.abs(Math.ceil(offset));
+
+const isAtChapterBoundary = (rendition: any, direction: "prev" | "next") => {
+  let doc = rendition.getDocument?.();
+  let element = rendition.element || document.getElementById("page-area");
+  if (!doc) return false;
+  if (direction === "prev") {
+    if (rendition.readerMode === "scroll") {
+      return !element || getScrollOffset(element.scrollTop) === 0;
+    }
+    if (rendition.isVertical?.()) {
+      return getScrollOffset(doc.body.scrollTop) === 0;
+    }
+    return getScrollOffset(doc.body.scrollLeft) === 0;
+  }
+  if (rendition.readerMode === "scroll") {
+    if (!element) return false;
+    return (
+      Math.abs(
+        element.scrollHeight -
+          getScrollOffset(element.scrollTop) -
+          element.clientHeight
+      ) < 20
+    );
+  }
+  if (rendition.isVertical?.()) {
+    return (
+      Math.abs(
+        doc.body.scrollHeight -
+          getScrollOffset(doc.body.scrollTop) -
+          doc.body.clientHeight
+      ) < 50
+    );
+  }
+  return (
+    Math.abs(
+      doc.body.scrollWidth -
+        getScrollOffset(doc.body.scrollLeft) -
+        doc.body.clientWidth
+    ) < 50
+  );
+};
+
+const navigateWithinChapter = async (
+  rendition: any,
+  direction: "prev" | "next"
+) => {
+  if (isAtChapterBoundary(rendition, direction)) return;
+  if (direction === "prev") {
+    await rendition.prev();
+  } else {
+    await rendition.next();
+  }
+};
+
 const mouseChrome = async (rendition: any, deltaY: number) => {
   if (deltaY < 0) {
-    await rendition.prev();
+    await navigateWithinChapter(rendition, "prev");
   }
   if (deltaY > 0) {
-    await rendition.next();
+    await navigateWithinChapter(rendition, "next");
   }
 };
 
@@ -205,35 +260,16 @@ const handleShortcut = (event: any) => {
 
 const gesture = async (rendition: any, type: string) => {
   if (type === "panleft" || type === "panup") {
-    await rendition.next();
+    await navigateWithinChapter(rendition, "next");
   }
   if (type === "panright" || type === "pandown") {
-    await rendition.prev();
+    await navigateWithinChapter(rendition, "prev");
   }
 };
 
 const handleLocation = (key: string, rendition: any) => {
   let position = rendition.getPosition();
   ConfigService.setObjectConfig(key, position, "recordLocation");
-};
-export const scrollChapter = async (
-  element: any,
-  rendition: any,
-  deltaY: number
-) => {
-  if (deltaY < 0) {
-    if (element.scrollTop === 0) {
-      await rendition.prev();
-    }
-  }
-  if (deltaY > 0) {
-    var scrollHeight = element.scrollHeight;
-    var scrollTop = element.scrollTop;
-    var clientHeight = element.clientHeight;
-    if (Math.abs(scrollTop + clientHeight - scrollHeight) < 10) {
-      await rendition.next();
-    }
-  }
 };
 let lastScaleTime = 0;
 export const bindHtmlEvent = (
@@ -281,13 +317,6 @@ export const bindHtmlEvent = (
       if (readerMode === "scroll") {
         await sleep(200);
         await rendition.record();
-        if (
-          Math.abs(event.deltaX) === 0 &&
-          ConfigService.getReaderConfig("isDisableAutoScroll") !== "yes"
-        ) {
-          let srollElement = document.getElementById("page-area");
-          await scrollChapter(srollElement, rendition, event.deltaY);
-        }
       } else {
         if (Math.abs(event.deltaX) === 0) {
           await mouseChrome(rendition, event.deltaY);
