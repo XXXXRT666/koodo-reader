@@ -23,6 +23,7 @@ export interface TextToSpeechState {
   isAudioOn: boolean;
   isPaused: boolean;
   currentIndex: number;
+  isSpeechAutoTurnPage: boolean;
   voiceLocale: string;
   languageList: string[];
   voiceList: any;
