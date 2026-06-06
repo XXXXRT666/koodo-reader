@@ -24,6 +24,7 @@ import { Howl } from "howler";
 declare var window: any;
 const DEFAULT_SPEECH_SEGMENT_MAX_LENGTH = 450;
 const DEFAULT_SPEECH_SEGMENT_DELAY = 0.5;
+const SPEECH_AUTO_TURN_PAGE_CONFIG = "isSpeechAutoTurnPage";
 
 class TextToSpeech extends React.Component<
   TextToSpeechProps,
@@ -45,6 +46,8 @@ class TextToSpeech extends React.Component<
       isAudioOn: false,
       isPaused: false,
       currentIndex: 0,
+      isSpeechAutoTurnPage:
+        ConfigService.getReaderConfig(SPEECH_AUTO_TURN_PAGE_CONFIG) !== "no",
       languageList: [],
       voiceList: {},
       voiceLocale:
@@ -273,6 +276,36 @@ class TextToSpeech extends React.Component<
       );
     }
     this.setState({ multiRoleEnabled: enabled });
+  };
+  handleSpeechAutoTurnPageToggle = () => {
+    const next = !this.state.isSpeechAutoTurnPage;
+    ConfigService.setReaderConfig(
+      SPEECH_AUTO_TURN_PAGE_CONFIG,
+      next ? "yes" : "no"
+    );
+    this.setState({ isSpeechAutoTurnPage: next });
+    toast(this.props.t("Change successful"));
+  };
+  handleSpeechPageEnd = async (isNodeListEnd: boolean) => {
+    if (!this.state.isSpeechAutoTurnPage) return;
+    if (
+      this.props.currentBook.format === "PDF" &&
+      !ConfigService.getAllListConfig("convertPDFBooks").includes(
+        this.props.currentBook.key
+      )
+    ) {
+      let currentPosition = this.props.htmlBook.rendition.getPosition();
+      await this.props.htmlBook.rendition.goToChapterIndex(
+        parseInt(currentPosition.chapterDocIndex) +
+          (this.props.readerMode === "double" ? 2 : 1)
+      );
+    } else {
+      if (isNodeListEnd) {
+        await this.props.htmlBook.rendition.nextChapter();
+      } else {
+        await this.props.htmlBook.rendition.next();
+      }
+    }
   };
   stopPreviewAudio = () => {
     window.speechSynthesis && window.speechSynthesis.cancel();
@@ -698,6 +731,10 @@ class TextToSpeech extends React.Component<
     }
 
     if (nodeList.length === 0) {
+      if (!this.state.isSpeechAutoTurnPage) {
+        this.setState({ isAudioOn: false });
+        return [];
+      }
       if (
         this.props.currentBook.format === "PDF" &&
         !ConfigService.getAllListConfig("convertPDFBooks").includes(
@@ -798,24 +835,7 @@ class TextToSpeech extends React.Component<
       }
 
       if (isReachPageEnd) {
-        if (
-          this.props.currentBook.format === "PDF" &&
-          !ConfigService.getAllListConfig("convertPDFBooks").includes(
-            this.props.currentBook.key
-          )
-        ) {
-          let currentPosition = this.props.htmlBook.rendition.getPosition();
-          await this.props.htmlBook.rendition.goToChapterIndex(
-            parseInt(currentPosition.chapterDocIndex) +
-              (this.props.readerMode === "double" ? 2 : 1)
-          );
-        } else {
-          if (index === this.nodeList.length - 1) {
-            await this.props.htmlBook.rendition.nextChapter();
-          } else {
-            await this.props.htmlBook.rendition.next();
-          }
-        }
+        await this.handleSpeechPageEnd(index === this.nodeList.length - 1);
       }
       if (res === "end") {
         break;
@@ -831,6 +851,10 @@ class TextToSpeech extends React.Component<
         "recordLocation"
       );
       this.nodeList = [];
+      if (!this.state.isSpeechAutoTurnPage) {
+        this.setState({ isAudioOn: false, currentIndex: 0 });
+        return;
+      }
       await this.handleAudio();
     }
   }
@@ -838,6 +862,10 @@ class TextToSpeech extends React.Component<
     if (this.state.isPaused || !this.state.isAudioOn) return;
     if (index >= this.nodeList.length) {
       this.nodeList = [];
+      if (!this.state.isSpeechAutoTurnPage) {
+        this.setState({ isAudioOn: false, currentIndex: 0 });
+        return;
+      }
       await this.handleAudio();
       return;
     }
@@ -880,24 +908,7 @@ class TextToSpeech extends React.Component<
         isReachPageEnd = true;
       }
       if (isReachPageEnd) {
-        if (
-          this.props.currentBook.format === "PDF" &&
-          !ConfigService.getAllListConfig("convertPDFBooks").includes(
-            this.props.currentBook.key
-          )
-        ) {
-          let currentPosition = this.props.htmlBook.rendition.getPosition();
-          await this.props.htmlBook.rendition.goToChapterIndex(
-            parseInt(currentPosition.chapterDocIndex) +
-              (this.props.readerMode === "double" ? 2 : 1)
-          );
-        } else {
-          if (index === this.nodeList.length - 1) {
-            await this.props.htmlBook.rendition.nextChapter();
-          } else {
-            await this.props.htmlBook.rendition.next();
-          }
-        }
+        await this.handleSpeechPageEnd(index === this.nodeList.length - 1);
       }
       if (
         this.state.isAudioOn &&
@@ -1324,6 +1335,38 @@ class TextToSpeech extends React.Component<
               this.forceUpdate();
             }}
           />
+        </div>
+        <div
+          className="setting-dialog-new-title"
+          style={{
+            marginLeft: "20px",
+            width: "88%",
+            fontWeight: 500,
+          }}
+        >
+          <span style={{ width: "calc(100% - 50px)" }}>
+            <Trans>Auto turn pages while reading aloud</Trans>
+          </span>
+          <span
+            className="single-control-switch"
+            onClick={this.handleSpeechAutoTurnPageToggle}
+            style={this.state.isSpeechAutoTurnPage ? {} : { opacity: 0.6 }}
+          >
+            <span
+              className="single-control-button"
+              style={
+                this.state.isSpeechAutoTurnPage
+                  ? {
+                      transform: "translateX(20px)",
+                      transition: "transform 0.5s ease",
+                    }
+                  : {
+                      transform: "translateX(0px)",
+                      transition: "transform 0.5s ease",
+                    }
+              }
+            ></span>
+          </span>
         </div>
         <div style={{ marginTop: "20px", textAlign: "center" }}>
           <span
