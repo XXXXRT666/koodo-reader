@@ -57,7 +57,7 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
           USE_HARD_LINKS: false
-        run: yarn release --win nsis zip --x64 --publish never
+        run: yarn release --win nsis --x64 --publish never
 
       - name: Build unsigned macOS package
         if: runner.os == 'macOS'
@@ -73,7 +73,6 @@ jobs:
           path: |
             dist/*.dmg
             dist/*.exe
-            dist/*.zip
           if-no-files-found: error
 
   upload-modelscope-windows-zip:
@@ -104,13 +103,24 @@ jobs:
             echo "MODELSCOPE_TOKEN secret is not set" >&2
             exit 1
           fi
-          zip_path="$(find dist/windows -maxdepth 1 -type f -name '*.zip' | head -n 1)"
-          if [ -z "${zip_path}" ]; then
-            echo "No Windows zip package found in downloaded artifact" >&2
+          exe_path="$(find dist/windows -maxdepth 1 -type f -name '*.exe' | head -n 1)"
+          if [ -z "${exe_path}" ]; then
+            echo "No Windows exe package found in downloaded artifact" >&2
             exit 1
           fi
-          zip_name="$(basename "${zip_path}")"
-          modelscope upload XXXXRT/111 "${zip_path}" "${zip_name}" \
+          zip_path="koodo-reader-windows-unsigned.zip"
+          export EXE_PATH="${exe_path}"
+          export ZIP_PATH="${zip_path}"
+          python - <<'PY'
+          import os
+          import zipfile
+
+          exe_path = os.environ["EXE_PATH"]
+          zip_path = os.environ["ZIP_PATH"]
+          with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+              archive.write(exe_path, os.path.basename(exe_path))
+          PY
+          modelscope upload XXXXRT/111 "${zip_path}" "${zip_path}" \
             --repo-type model \
             --token "${MODELSCOPE_API_TOKEN}" \
             --commit-message "Upload Windows unsigned zip from ${GITHUB_SHA}"
