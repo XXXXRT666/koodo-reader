@@ -312,7 +312,7 @@ class TextToSpeech extends React.Component<
       10
     );
     if (Number.isNaN(boost)) return 100;
-    return Math.min(200, Math.max(100, boost));
+    return Math.min(400, Math.max(100, boost));
   };
   getSpeechBoost = () => {
     return this.getSpeechBoostPercent() / 100;
@@ -346,7 +346,7 @@ class TextToSpeech extends React.Component<
     const value = parseInt(event.target.value, 10);
     const nextValue = Number.isNaN(value)
       ? 100
-      : Math.min(200, Math.max(100, value));
+      : Math.min(400, Math.max(100, value));
     ConfigService.setReaderConfig(VOICE_BOOST_CONFIG, `${nextValue}`);
     this.applySpeechGain();
     this.forceUpdate();
@@ -1415,7 +1415,7 @@ class TextToSpeech extends React.Component<
           <input
             type="range"
             min="100"
-            max="200"
+            max="400"
             step="1"
             className="lang-setting-dropdown"
             value={this.getSpeechBoostPercent()}
