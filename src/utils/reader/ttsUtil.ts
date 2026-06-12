@@ -10,7 +10,7 @@ class TTSUtil {
   static isPaused: boolean = false;
   static pausedMidSentence: boolean = false;
   static processingIndexes: Set<number> = new Set();
-  static async readAloud(currentIndex: number) {
+  static async readAloud(currentIndex: number, volume: number = 1) {
     // 清理比当前 index 小 10 的已朗读缓存
     this.audioPaths = this.audioPaths.filter(
       (item) => item.index >= currentIndex - 10
@@ -26,6 +26,7 @@ class TTSUtil {
       var sound = new Howl({
         src: [audioPath],
         format: [getFormatFromAudioPath(audioPath)],
+        volume,
         onloaderror: () => {
           resolve("loaderror");
         },

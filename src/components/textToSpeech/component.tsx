@@ -25,6 +25,7 @@ declare var window: any;
 const DEFAULT_SPEECH_SEGMENT_MAX_LENGTH = 450;
 const DEFAULT_SPEECH_SEGMENT_DELAY = 0.5;
 const SPEECH_AUTO_TURN_PAGE_CONFIG = "isSpeechAutoTurnPage";
+const VOICE_VOLUME_CONFIG = "voiceVolume";
 
 class TextToSpeech extends React.Component<
   TextToSpeechProps,
@@ -286,6 +287,32 @@ class TextToSpeech extends React.Component<
     this.setState({ isSpeechAutoTurnPage: next });
     toast(this.props.t("Change successful"));
   };
+  getSpeechVolumePercent = () => {
+    const volume = parseInt(
+      ConfigService.getReaderConfig(VOICE_VOLUME_CONFIG) || "100",
+      10
+    );
+    if (Number.isNaN(volume)) return 100;
+    return Math.min(100, Math.max(0, volume));
+  };
+  getSpeechVolume = () => {
+    return this.getSpeechVolumePercent() / 100;
+  };
+  handleSpeechVolumeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseInt(event.target.value, 10);
+    const nextValue = Number.isNaN(value)
+      ? 100
+      : Math.min(100, Math.max(0, value));
+    ConfigService.setReaderConfig(VOICE_VOLUME_CONFIG, `${nextValue}`);
+    const player = TTSUtil.getPlayer();
+    if (player && player.volume) {
+      player.volume(this.getSpeechVolume());
+    }
+    if (this.previewPlayer) {
+      this.previewPlayer.volume(this.getSpeechVolume());
+    }
+    this.forceUpdate();
+  };
   handleSpeechPageEnd = async (isNodeListEnd: boolean) => {
     if (!this.state.isSpeechAutoTurnPage) return;
     if (
@@ -357,6 +384,7 @@ class TextToSpeech extends React.Component<
         this.nativeVoices.find((item: any) => item.name === voiceName) ||
         this.nativeVoices[0];
       msg.rate = speed;
+      msg.volume = this.getSpeechVolume();
       msg.onerror = () => {
         toast.error(this.props.t("Audio loading failed, stopped playback"));
       };
@@ -399,6 +427,7 @@ class TextToSpeech extends React.Component<
     this.previewPlayer = new Howl({
       src: [audioPath],
       format: [getFormatFromAudioPath(audioPath)],
+      volume: this.getSpeechVolume(),
       onloaderror: () => {
         toast.error(this.props.t("Audio loading failed, stopped playback"));
       },
@@ -940,7 +969,7 @@ class TextToSpeech extends React.Component<
   }
   handleSpeech = async (index: number) => {
     return new Promise<string>(async (resolve) => {
-      let res = await TTSUtil.readAloud(index);
+      let res = await TTSUtil.readAloud(index, this.getSpeechVolume());
       if (res === "loaderror") {
         resolve("error");
       } else {
@@ -975,6 +1004,7 @@ class TextToSpeech extends React.Component<
         (voice: any) => voice.name === voiceName
       );
       msg.rate = speed;
+      msg.volume = this.getSpeechVolume();
       window.speechSynthesis && window.speechSynthesis.cancel();
       window.speechSynthesis.speak(msg);
       msg.onerror = (err) => {
@@ -1276,6 +1306,21 @@ class TextToSpeech extends React.Component<
               </option>
             ))}
           </select>
+        </div>
+        <div
+          className="setting-dialog-new-title"
+          style={{ marginLeft: "20px", width: "88%", fontWeight: 500 }}
+        >
+          <Trans>Volume</Trans> {this.getSpeechVolumePercent()}%
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            className="lang-setting-dropdown"
+            value={this.getSpeechVolumePercent()}
+            onChange={this.handleSpeechVolumeChange}
+          />
         </div>
         <div
           className="setting-dialog-new-title"
