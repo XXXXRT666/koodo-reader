@@ -9,7 +9,6 @@ import {
 import {
   checkReachPageEnd,
   getAllVoices,
-  getFormatFromAudioPath,
   langToName,
   sleep,
   splitSentences,
@@ -20,12 +19,12 @@ import TTSUtil from "../../utils/reader/ttsUtil";
 import "./textToSpeech.css";
 import { fetchUserInfo } from "../../utils/request/user";
 import { getSplitSentence } from "../../utils/request/reader";
-import { Howl } from "howler";
 declare var window: any;
 const DEFAULT_SPEECH_SEGMENT_MAX_LENGTH = 450;
 const DEFAULT_SPEECH_SEGMENT_DELAY = 0.5;
 const SPEECH_AUTO_TURN_PAGE_CONFIG = "isSpeechAutoTurnPage";
 const VOICE_VOLUME_CONFIG = "voiceVolume";
+const VOICE_BOOST_CONFIG = "voiceBoost";
 
 class TextToSpeech extends React.Component<
   TextToSpeechProps,
@@ -39,7 +38,7 @@ class TextToSpeech extends React.Component<
   customVoices: any;
   voices: any;
   nativeVoices: any;
-  previewPlayer: Howl | null;
+  previewPlayer: any;
   constructor(props: TextToSpeechProps) {
     super(props);
     this.state = {
@@ -298,19 +297,49 @@ class TextToSpeech extends React.Component<
   getSpeechVolume = () => {
     return this.getSpeechVolumePercent() / 100;
   };
+  getSpeechBoostPercent = () => {
+    const boost = parseInt(
+      ConfigService.getReaderConfig(VOICE_BOOST_CONFIG) || "100",
+      10
+    );
+    if (Number.isNaN(boost)) return 100;
+    return Math.min(200, Math.max(100, boost));
+  };
+  getSpeechBoost = () => {
+    return this.getSpeechBoostPercent() / 100;
+  };
+  applySpeechGain = () => {
+    const player = TTSUtil.getPlayer();
+    if (player && player.setGain) {
+      player.setGain(this.getSpeechVolume(), this.getSpeechBoost());
+    } else if (player && player.volume) {
+      player.volume(this.getSpeechVolume());
+    }
+    if (this.previewPlayer && this.previewPlayer.setGain) {
+      this.previewPlayer.setGain(
+        this.getSpeechVolume(),
+        this.getSpeechBoost()
+      );
+    } else if (this.previewPlayer && this.previewPlayer.volume) {
+      this.previewPlayer.volume(this.getSpeechVolume());
+    }
+  };
   handleSpeechVolumeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseInt(event.target.value, 10);
     const nextValue = Number.isNaN(value)
       ? 100
       : Math.min(100, Math.max(0, value));
     ConfigService.setReaderConfig(VOICE_VOLUME_CONFIG, `${nextValue}`);
-    const player = TTSUtil.getPlayer();
-    if (player && player.volume) {
-      player.volume(this.getSpeechVolume());
-    }
-    if (this.previewPlayer) {
-      this.previewPlayer.volume(this.getSpeechVolume());
-    }
+    this.applySpeechGain();
+    this.forceUpdate();
+  };
+  handleSpeechBoostChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseInt(event.target.value, 10);
+    const nextValue = Number.isNaN(value)
+      ? 100
+      : Math.min(200, Math.max(100, value));
+    ConfigService.setReaderConfig(VOICE_BOOST_CONFIG, `${nextValue}`);
+    this.applySpeechGain();
     this.forceUpdate();
   };
   handleSpeechPageEnd = async (isNodeListEnd: boolean) => {
@@ -338,7 +367,7 @@ class TextToSpeech extends React.Component<
     window.speechSynthesis && window.speechSynthesis.cancel();
     if (this.previewPlayer) {
       this.previewPlayer.stop();
-      this.previewPlayer.unload();
+      this.previewPlayer.unload && this.previewPlayer.unload();
       this.previewPlayer = null;
     }
   };
@@ -424,15 +453,17 @@ class TextToSpeech extends React.Component<
       toast.error(this.props.t("Audio loading failed, stopped playback"));
       return;
     }
-    this.previewPlayer = new Howl({
-      src: [audioPath],
-      format: [getFormatFromAudioPath(audioPath)],
-      volume: this.getSpeechVolume(),
-      onloaderror: () => {
-        toast.error(this.props.t("Audio loading failed, stopped playback"));
-      },
-    });
-    this.previewPlayer.play();
+    try {
+      this.previewPlayer = await TTSUtil.createPlayer(
+        audioPath,
+        this.getSpeechVolume(),
+        this.getSpeechBoost()
+      );
+      this.previewPlayer.play();
+    } catch (error) {
+      console.error(error);
+      toast.error(this.props.t("Audio loading failed, stopped playback"));
+    }
   };
   renderVoicePreviewLabel = (
     label: string,
@@ -969,7 +1000,11 @@ class TextToSpeech extends React.Component<
   }
   handleSpeech = async (index: number) => {
     return new Promise<string>(async (resolve) => {
-      let res = await TTSUtil.readAloud(index, this.getSpeechVolume());
+      let res = await TTSUtil.readAloud(
+        index,
+        this.getSpeechVolume(),
+        this.getSpeechBoost()
+      );
       if (res === "loaderror") {
         resolve("error");
       } else {
@@ -1320,6 +1355,21 @@ class TextToSpeech extends React.Component<
             className="lang-setting-dropdown"
             value={this.getSpeechVolumePercent()}
             onChange={this.handleSpeechVolumeChange}
+          />
+        </div>
+        <div
+          className="setting-dialog-new-title"
+          style={{ marginLeft: "20px", width: "88%", fontWeight: 500 }}
+        >
+          <Trans>Boost</Trans> {this.getSpeechBoostPercent()}%
+          <input
+            type="range"
+            min="100"
+            max="200"
+            step="1"
+            className="lang-setting-dropdown"
+            value={this.getSpeechBoostPercent()}
+            onChange={this.handleSpeechBoostChange}
           />
         </div>
         <div

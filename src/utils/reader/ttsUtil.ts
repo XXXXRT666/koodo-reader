@@ -1,8 +1,154 @@
-import { Howl } from "howler";
 import PluginModel from "../../models/Plugin";
-import { getAllVoices, getFormatFromAudioPath } from "../common";
+import { getAllVoices } from "../common";
 import { getTTSAudio } from "../request/reader";
 import { isElectron } from "react-device-detect";
+
+declare var window: any;
+
+class BoostAudioPlayer {
+  private context: AudioContext;
+  private buffer: AudioBuffer;
+  private gainNode: GainNode;
+  private source: AudioBufferSourceNode | null = null;
+  private offset: number = 0;
+  private startedAt: number = 0;
+  private isStopping: boolean = false;
+  private isClosed: boolean = false;
+  private endHandlers: (() => void)[] = [];
+  private volumeValue: number;
+  private boostValue: number;
+
+  constructor(
+    context: AudioContext,
+    buffer: AudioBuffer,
+    volume: number,
+    boost: number
+  ) {
+    this.context = context;
+    this.buffer = buffer;
+    this.gainNode = this.context.createGain();
+    this.gainNode.connect(this.context.destination);
+    this.volumeValue = volume;
+    this.boostValue = boost;
+    this.updateGain();
+  }
+
+  private updateGain() {
+    this.gainNode.gain.value = this.volumeValue * this.boostValue;
+  }
+
+  private closeContext() {
+    if (this.isClosed) return;
+    this.isClosed = true;
+    this.context.close();
+  }
+
+  setGain(volume: number, boost: number) {
+    this.volumeValue = volume;
+    this.boostValue = boost;
+    this.updateGain();
+  }
+
+  volume(volume?: number) {
+    if (typeof volume === "number") {
+      this.volumeValue = volume;
+      this.updateGain();
+    }
+    return this.volumeValue;
+  }
+
+  play() {
+    if (this.source) return;
+    if (this.context.state === "suspended") {
+      this.context.resume();
+    }
+    this.source = this.context.createBufferSource();
+    this.source.buffer = this.buffer;
+    this.source.connect(this.gainNode);
+    this.startedAt = this.context.currentTime - this.offset;
+    this.isStopping = false;
+    this.source.onended = () => {
+      this.source = null;
+      if (this.isStopping) return;
+      this.offset = 0;
+      this.closeContext();
+      this.endHandlers.forEach((handler) => handler());
+    };
+    this.source.start(0, this.offset);
+  }
+
+  pause() {
+    if (!this.source) return;
+    this.offset = this.context.currentTime - this.startedAt;
+    this.isStopping = true;
+    this.source.stop();
+    this.source.disconnect();
+    this.source = null;
+  }
+
+  stop() {
+    this.offset = 0;
+    this.isStopping = true;
+    if (this.source) {
+      this.source.stop();
+      this.source.disconnect();
+      this.source = null;
+    }
+    this.closeContext();
+  }
+
+  unload() {
+    this.stop();
+  }
+
+  on(event: string, handler: () => void) {
+    if (event === "end") {
+      this.endHandlers.push(handler);
+    }
+  }
+}
+
+const base64ToArrayBuffer = (base64: string) => {
+  const binary = window.atob(base64);
+  const arrayBuffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(arrayBuffer);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return arrayBuffer;
+};
+
+const isLocalFilePath = (audioPath: string) => {
+  return (
+    audioPath.startsWith("/") ||
+    /^[a-zA-Z]:[\\/]/.test(audioPath) ||
+    audioPath.startsWith("\\\\")
+  );
+};
+
+const loadAudioBuffer = async (audioPath: string, context: AudioContext) => {
+  let arrayBuffer: ArrayBuffer;
+  if (audioPath.startsWith("data:")) {
+    const base64 = audioPath.split(",")[1];
+    arrayBuffer = base64ToArrayBuffer(base64);
+  } else if (audioPath.startsWith("http") || audioPath.startsWith("blob:")) {
+    arrayBuffer = await fetch(audioPath).then((res) => res.arrayBuffer());
+  } else if (isElectron && isLocalFilePath(audioPath)) {
+    const fs = window.require("fs");
+    if (fs.existsSync(audioPath)) {
+      const buffer = fs.readFileSync(audioPath);
+      arrayBuffer = buffer.buffer.slice(
+        buffer.byteOffset,
+        buffer.byteOffset + buffer.byteLength
+      );
+    } else {
+      arrayBuffer = base64ToArrayBuffer(audioPath);
+    }
+  } else {
+    arrayBuffer = base64ToArrayBuffer(audioPath);
+  }
+  return context.decodeAudioData(arrayBuffer);
+};
 
 class TTSUtil {
   static player: any;
@@ -10,7 +156,21 @@ class TTSUtil {
   static isPaused: boolean = false;
   static pausedMidSentence: boolean = false;
   static processingIndexes: Set<number> = new Set();
-  static async readAloud(currentIndex: number, volume: number = 1) {
+  static async createPlayer(
+    audioPath: string,
+    volume: number = 1,
+    boost: number = 1
+  ) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    const context = new AudioContextClass();
+    const buffer = await loadAudioBuffer(audioPath, context);
+    return new BoostAudioPlayer(context, buffer, volume, boost);
+  }
+  static async readAloud(
+    currentIndex: number,
+    volume: number = 1,
+    boost: number = 1
+  ) {
     // 清理比当前 index 小 10 的已朗读缓存
     this.audioPaths = this.audioPaths.filter(
       (item) => item.index >= currentIndex - 10
@@ -23,19 +183,17 @@ class TTSUtil {
         resolve("loaderror");
         return;
       }
-      var sound = new Howl({
-        src: [audioPath],
-        format: [getFormatFromAudioPath(audioPath)],
-        volume,
-        onloaderror: () => {
-          resolve("loaderror");
-        },
-        onload: async () => {
-          this.player.play();
-          resolve("load");
-        },
-      });
-      this.player = sound;
+      try {
+        if (this.player && this.player.stop) {
+          this.player.stop();
+        }
+        this.player = await this.createPlayer(audioPath, volume, boost);
+        this.player.play();
+        resolve("load");
+      } catch (error) {
+        console.error(error);
+        resolve("loaderror");
+      }
     });
   }
   static async cacheAudio(
