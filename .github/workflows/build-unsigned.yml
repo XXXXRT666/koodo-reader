@@ -2,21 +2,20 @@ name: Build unsigned desktop app
 
 on:
   workflow_dispatch:
+    inputs:
+      windows_only:
+        description: Build only the Windows x64 installer
+        type: boolean
+        default: false
 
 jobs:
   build:
     name: Build ${{ matrix.platform }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.platform == 'Windows' && 'windows-latest' || 'macos-latest' }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: macOS
-            os: macos-latest
-            artifact: koodo-reader-macos-unsigned
-          - platform: Windows
-            os: windows-latest
-            artifact: koodo-reader-windows-unsigned
+        platform: ${{ fromJSON(inputs.windows_only && '["Windows"]' || '["macOS", "Windows"]') }}
 
     steps:
       - name: Check out repository
@@ -69,7 +68,7 @@ jobs:
       - name: Upload package artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: ${{ matrix.artifact }}
+          name: koodo-reader-${{ runner.os == 'Windows' && 'windows' || 'macos' }}-unsigned
           path: |
             dist/*.dmg
             dist/*.exe
