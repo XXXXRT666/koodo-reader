@@ -10,6 +10,7 @@ import {
 import {
   checkReachPageEnd,
   getAllVoices,
+  getFormatFromAudioPath,
   isReadingRawPDF,
   langToName,
   sleep,
@@ -22,12 +23,15 @@ import { getTextRules } from "../../utils/common";
 import "./textToSpeech.css";
 import { fetchUserInfo } from "../../utils/request/user";
 import { getSplitSentence } from "../../utils/request/reader";
+import { Howl } from "howler";
 declare var window: any;
 const DEFAULT_SPEECH_SEGMENT_MAX_LENGTH = 450;
 const DEFAULT_SPEECH_SEGMENT_DELAY = 0.5;
 const SPEECH_AUTO_TURN_PAGE_CONFIG = "isSpeechAutoTurnPage";
 const VOICE_VOLUME_CONFIG = "voiceVolume";
-const VOICE_BOOST_CONFIG = "voiceBoost";
+const DEFAULT_VOICE_NAME =
+  "cosyvoice-v3.5-plus-bailian-968248e6a5614af3a77503c96e744ef1";
+const DEFAULT_VOICE_ENGINE = "qwen-custom-voice-tts-plugin";
 
 class TextToSpeech extends React.Component<
   TextToSpeechProps,
@@ -41,8 +45,12 @@ class TextToSpeech extends React.Component<
   customVoices: any;
   voices: any;
   nativeVoices: any;
-  previewPlayer: any;
+  previewPlayer: Howl | null;
   highlightUtil: any;
+  shouldSelectDefaultVoice =
+    !ConfigService.getReaderConfig("voiceName") &&
+    !ConfigService.getReaderConfig("voiceEngine") &&
+    !ConfigService.getReaderConfig("voiceIndex");
   constructor(props: TextToSpeechProps) {
     super(props);
     this.highlightUtil = new HighlightUtil(ConfigService);
@@ -306,30 +314,12 @@ class TextToSpeech extends React.Component<
   getSpeechVolume = () => {
     return this.getSpeechVolumePercent() / 100;
   };
-  getSpeechBoostPercent = () => {
-    const boost = parseInt(
-      ConfigService.getReaderConfig(VOICE_BOOST_CONFIG) || "100",
-      10
-    );
-    if (Number.isNaN(boost)) return 100;
-    return Math.min(400, Math.max(100, boost));
-  };
-  getSpeechBoost = () => {
-    return this.getSpeechBoostPercent() / 100;
-  };
-  applySpeechGain = () => {
+  applySpeechVolume = () => {
     const player = TTSUtil.getPlayer();
-    if (player && player.setGain) {
-      player.setGain(this.getSpeechVolume(), this.getSpeechBoost());
-    } else if (player && player.volume) {
+    if (player && player.volume) {
       player.volume(this.getSpeechVolume());
     }
-    if (this.previewPlayer && this.previewPlayer.setGain) {
-      this.previewPlayer.setGain(
-        this.getSpeechVolume(),
-        this.getSpeechBoost()
-      );
-    } else if (this.previewPlayer && this.previewPlayer.volume) {
+    if (this.previewPlayer) {
       this.previewPlayer.volume(this.getSpeechVolume());
     }
   };
@@ -339,16 +329,7 @@ class TextToSpeech extends React.Component<
       ? 100
       : Math.min(100, Math.max(0, value));
     ConfigService.setReaderConfig(VOICE_VOLUME_CONFIG, `${nextValue}`);
-    this.applySpeechGain();
-    this.forceUpdate();
-  };
-  handleSpeechBoostChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseInt(event.target.value, 10);
-    const nextValue = Number.isNaN(value)
-      ? 100
-      : Math.min(400, Math.max(100, value));
-    ConfigService.setReaderConfig(VOICE_BOOST_CONFIG, `${nextValue}`);
-    this.applySpeechGain();
+    this.applySpeechVolume();
     this.forceUpdate();
   };
   handleSpeechPageEnd = async (isNodeListEnd: boolean) => {
@@ -457,17 +438,15 @@ class TextToSpeech extends React.Component<
       toast.error(this.props.t("Audio loading failed, stopped playback"));
       return;
     }
-    try {
-      this.previewPlayer = await TTSUtil.createPlayer(
-        audioPath,
-        this.getSpeechVolume(),
-        this.getSpeechBoost()
-      );
-      this.previewPlayer.play();
-    } catch (error) {
-      console.error(error);
-      toast.error(this.props.t("Audio loading failed, stopped playback"));
-    }
+    this.previewPlayer = new Howl({
+      src: [audioPath],
+      format: [getFormatFromAudioPath(audioPath)],
+      volume: this.getSpeechVolume(),
+      onloaderror: () => {
+        toast.error(this.props.t("Audio loading failed, stopped playback"));
+      },
+    });
+    this.previewPlayer.play();
   };
   renderVoicePreviewLabel = (
     label: string,
@@ -1039,8 +1018,7 @@ class TextToSpeech extends React.Component<
     return new Promise<string>(async (resolve) => {
       let res = await TTSUtil.readAloud(
         index,
-        this.getSpeechVolume(),
-        this.getSpeechBoost()
+        this.getSpeechVolume()
       );
       if (res === "loaderror") {
         resolve("error");
@@ -1095,6 +1073,20 @@ class TextToSpeech extends React.Component<
     });
   };
   handleVoiceLocaleList = () => {
+    if (this.shouldSelectDefaultVoice) {
+      const defaultVoice = this.voices.find(
+        (item) =>
+          item.name === DEFAULT_VOICE_NAME &&
+          item.plugin === DEFAULT_VOICE_ENGINE
+      );
+      if (defaultVoice) {
+        ConfigService.setReaderConfig("voiceName", defaultVoice.name);
+        ConfigService.setReaderConfig("voiceEngine", defaultVoice.plugin);
+        ConfigService.setReaderConfig("voiceLocale", defaultVoice.locale);
+        this.setState({ voiceLocale: defaultVoice.locale });
+        this.shouldSelectDefaultVoice = false;
+      }
+    }
     let voiceList = {};
     let totalVoiceList = this.voices;
     totalVoiceList.forEach((voice) => {
@@ -1267,6 +1259,7 @@ class TextToSpeech extends React.Component<
             id="text-speech-locale"
             value={ConfigService.getReaderConfig("voiceLocale")}
             onChange={(event) => {
+              this.shouldSelectDefaultVoice = false;
               ConfigService.setReaderConfig("voiceLocale", event.target.value);
               this.setState({ voiceLocale: event.target.value });
             }}
@@ -1304,6 +1297,7 @@ class TextToSpeech extends React.Component<
             onChange={(event) => {
               let selectedValue = event.target.value;
               let [voiceName, plugin] = selectedValue.split("#");
+              this.shouldSelectDefaultVoice = false;
               const previousEngine =
                 ConfigService.getReaderConfig("voiceEngine");
               ConfigService.setReaderConfig("voiceName", voiceName);
@@ -1405,21 +1399,6 @@ class TextToSpeech extends React.Component<
             className="lang-setting-dropdown"
             value={this.getSpeechVolumePercent()}
             onChange={this.handleSpeechVolumeChange}
-          />
-        </div>
-        <div
-          className="setting-dialog-new-title"
-          style={{ marginLeft: "20px", width: "88%", fontWeight: 500 }}
-        >
-          <Trans>Boost</Trans> {this.getSpeechBoostPercent()}%
-          <input
-            type="range"
-            min="100"
-            max="400"
-            step="1"
-            className="lang-setting-dropdown"
-            value={this.getSpeechBoostPercent()}
-            onChange={this.handleSpeechBoostChange}
           />
         </div>
         <div

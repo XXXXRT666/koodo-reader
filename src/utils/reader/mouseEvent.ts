@@ -241,6 +241,33 @@ const arrowKeys = async (
 const getScrollOffset = (offset: number) => Math.abs(Math.ceil(offset));
 
 const isAtChapterBoundary = (rendition: any, direction: "prev" | "next") => {
+  // Reading aids can still advance inside the viewport at a page boundary.
+  const ruler = rendition.readingRulerManager;
+  if (rendition.isReadingRuler === "yes" && !ruler.skipFlip) {
+    const columnBounds = ruler.getColumnBounds();
+    const chunkCount = Math.ceil(
+      ruler.getLines(columnBounds).length / ruler.getStep()
+    );
+    const index = ruler.index >= chunkCount ? 0 : ruler.index;
+    if (
+      chunkCount > 0 &&
+      (direction === "prev"
+        ? index > 0 || (columnBounds && ruler.column === 1)
+        : index < chunkCount - 1 || (columnBounds && ruler.column === 0))
+    ) {
+      return false;
+    }
+  }
+  const paragraph = rendition.paragraphModeManager;
+  if (rendition.isParagraphMode === "yes" && !paragraph.skipFlip) {
+    const paragraphCount = paragraph.getParagraphNodes().length;
+    if (paragraphCount > 0) {
+      return direction === "prev"
+        ? paragraph.index === 0 && paragraph.sliceIndex === 0
+        : paragraph.index >= paragraphCount - 1 &&
+            paragraph.sliceIndex >= paragraph.sliceCount - 1;
+    }
+  }
   let doc = rendition.getDocument?.();
   let element = rendition.element || document.getElementById("page-area");
   if (!doc) return false;
