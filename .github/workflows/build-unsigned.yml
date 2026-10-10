@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     name: Build ${{ matrix.platform }}
-    runs-on: ${{ matrix.platform == 'Windows' && 'windows-latest' || 'macos-latest' }}
+    runs-on: ${{ matrix.platform == 'Windows' && 'windows-2022' || 'macos-latest' }}
     strategy:
       fail-fast: false
       matrix:
